@@ -1,0 +1,35 @@
+services:
+  nids-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nids:latest
+    container_name: nids-daemon
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "8000:8000"
+    volumes:
+      - nids-data:/data
+      - /tmp:/tmp:rw
+    environment:
+      - NIDS_ENVIRONMENT=production
+      - NIDS_LOG_LEVEL=INFO
+      - NIDS_DATA_DIR=/data
+      - NIDS_DATABASE_URL=/data/nids.db
+      - NIDS_WAL_MODE=true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  nids-data:
+    driver: local
