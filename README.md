@@ -1,140 +1,207 @@
-# Network Intrusion Detection System (NIDS)
+# Network Intrusion Detection System (`nids`)
 
-High-performance, pure-Python Network Intrusion Detection System featuring binary multi-layer packet decoding, stateful 5-tuple flow tracking, Snort-compatible signature inspection, heuristic anomaly detectors, SQLite WAL persistence, FastAPI REST control plane, and Typer CLI.
+High-Performance Pure-Python Network Intrusion Detection System featuring Binary Multi-Layer Packet Decoding, Stateful 5-Tuple Flow Tracking, Snort-Compatible Signatures, Heuristic Anomaly Detectors, SQLite WAL Storage, and FastAPI Control Plane.
+
+[![CI Pipeline](https://github.com/Krish9800/network-intrusion-detection-system/actions/workflows/ci.yml/badge.svg)](https://github.com/Krish9800/network-intrusion-detection-system/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python: 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Inspection: Stateful 5-Tuple](https://img.shields.io/badge/Inspection-Stateful%205--Tuple-blueviolet.svg)](https://en.wikipedia.org/wiki/Stateful_firewall)
+[![Framework: MITRE ATT&CK](https://img.shields.io/badge/Framework-MITRE%20ATT%26CK-red.svg)](https://attack.mitre.org/)
 
 ---
 
-## Architecture Overview
+## Overview & Problem Statement
 
+Modern enterprise networks face diverse network-borne threats including port scanning, SYN flood denial-of-service, protocol misuse, and payload-based remote code execution exploits. Traditional heavy NIDS engines often require complex C-compilation toolchains and native library bindings, making them cumbersome for embedded environments, rapid deployment testing, or lightweight security microservices.
+
+**Network Intrusion Detection System (`nids`)** is a pure-Python, zero-native-dependency network intrusion detection platform. It decodes raw binary network packets across Ethernet II, IPv4, TCP, UDP, ICMP, DNS, and HTTP layers. The system tracks stateful bi-directional 5-tuple flows, applies Snort-compatible signature pattern matching, detects heuristic protocol anomalies, and logs structured alerts with MITRE ATT&CK references into an ACID SQLite database.
+
+---
+
+## Architecture & Data Flow
+
+```mermaid
+flowchart TD
+    subgraph Network Packet Ingestion
+        RawPackets[Raw Binary Packets: Hex String / PCAP / Socket] --> Decoder[PacketDecoder: struct unpacking]
+    end
+
+    subgraph Binary Protocol Decoding
+        Decoder --> Eth[Ethernet II Header]
+        Eth --> IPv4[IPv4 Header: Addresses / TTL / Flags]
+        IPv4 --> Transport{Transport Layer}
+        Transport -->|Protocol 6| TCP[TCP Header: Ports / Flags / Sequence]
+        Transport -->|Protocol 17| UDP[UDP Header: Ports / Length]
+        Transport -->|Protocol 1| ICMP[ICMP Header: Type / Code]
+        Transport --> AppPayload[Application Payload: DNS / HTTP]
+    end
+
+    subgraph Stateful Flow Tracking & Anomaly Detection
+        TCP --> FlowMgr[FlowTracker: Canonical 5-Tuple Keying]
+        UDP --> FlowMgr
+
+        FlowMgr --> FlowStates[Track TCP Handshake: SYN / SYN-ACK / ESTABLISHED / FIN]
+        FlowMgr --> AnomalyDet[AnomalyDetector: SYN Floods / Port Scans / Malformed Flags]
+    end
+
+    subgraph Signature Matching Engine
+        AppPayload --> SigEngine[SignatureEngine]
+        SigEngine --> RuleStore[(Snort-Compatible Rule Catalog)]
+        SigEngine --> PatternMatch[Aho-Corasick & Regex Payload Inspection]
+    end
+
+    subgraph Alert Aggregation & Management
+        AnomalyDet --> AlertSynthesizer[Alert Aggregator]
+        PatternMatch --> AlertSynthesizer
+
+        AlertSynthesizer --> SQLite[(SQLite WAL Store: Flows & Alerts)]
+        AlertSynthesizer --> CLI[Typer CLI / Rich Terminal]
+        AlertSynthesizer --> REST[FastAPI REST API]
+    end
 ```
-                                      ┌────────────────────────────────────────────────┐
-                                      │              Raw Network Packets               │
-                                      │          (Ethernet / IP / TCP / UDP)           │
-                                      └───────────────────────┬────────────────────────┘
-                                                              │
-                                                              ▼
-                                      ┌────────────────────────────────────────────────┐
-                                      │             PacketDecoder (struct)             │
-                                      │   Ethernet II -> IPv4 -> TCP/UDP/ICMP/DNS/HTTP │
-                                      └───────────────────────┬────────────────────────┘
-                                                              │
-                                      ┌───────────────────────┴────────────────────────┐
-                                      ▼                                                ▼
-         ┌──────────────────────────────────────────────┐    ┌──────────────────────────────────────────────┐
-         │          Stateful FlowTracker                │    │           Detection Pipeline                 │
-         │  • Canonical 5-Tuple Keying                  │    │  • SignatureEngine (Snort/Suricata rules)    │
-         │  • TCP Handshake / Teardown State Machine    │    │  • AnomalyDetector (SYN flood, port scan,    │
-         │  • TTL / Inactivity Eviction                 │    │    Shannon entropy DNS tunneling)            │
-         └──────────────────────┬───────────────────────┘    └──────────────────────┬───────────────────────┘
-                                │                                                   │
-                                └───────────────────────┬───────────────────────────┘
-                                                        │
-                                                        ▼
-                                      ┌────────────────────────────────────────────────┐
-                                      │            SQLite WAL Database                 │
-                                      │      (network_flows, nids_alerts, rules)       │
-                                      └───────────────────────┬────────────────────────┘
-                                                              │
-                                      ┌───────────────────────┴────────────────────────┐
-                                      ▼                                                ▼
-         ┌──────────────────────────────────────────────┐    ┌──────────────────────────────────────────────┐
-         │              FastAPI REST API                │    │                  Typer CLI                   │
-         │   • /api/v1/packets/ingest                   │    │   • nids analyze <hex | file>                │
-         │   • /api/v1/flows & /api/v1/alerts           │    │   • nids rules list                          │
-         │   • /api/v1/rules & /api/v1/health           │    │   • nids alerts list & nids flows list       │
-         └──────────────────────────────────────────────┘    └──────────────────────────────────────────────┘
-```
 
 ---
 
-## Features
+## Verified Features & Capabilities
 
-- **Binary Multi-Layer Packet Decoder**: Zero external C-dependencies, built purely with Python `struct` and `socket`. Decodes Ethernet II, IPv4, TCP (flags bitfield & options), UDP, ICMP, DNS query domains, and HTTP request headers.
-- **Stateful 5-Tuple Flow Tracker**: Bidirectional canonical hashing `(ip_a, port_a, ip_b, port_b, protocol)` maintaining client/server state, TCP connection lifecycle (`NEW` -> `SYN_SENT` -> `SYN_RECV` -> `ESTABLISHED` -> `FIN_WAIT` -> `CLOSED`), and byte/packet counters.
-- **Snort-Style Signature Engine**: Rule matching on transport protocol, CIDR/exact IP matching, port ranges/lists, payload content search with `nocase`, `offset`, and `depth`, plus PCRE-style regex evaluation.
-- **Statistical & Heuristic Anomaly Detectors**:
-  - **SYN Flood**: Tracks half-open SYN sessions without completion over sliding time windows.
-  - **Port Scan**: Flags single-source probing of >20 distinct ports within sliding thresholds.
-  - **DNS Tunneling**: High Shannon entropy ($H \ge 3.8$) detection on fully qualified domain names and subdomains.
-- **Storage Layer**: SQLite WAL engine with parameterized safety, transactional atomicity, and indices.
-- **Control Plane**: FastAPI service with OpenAPI docs, and rich Typer CLI with terminal tables.
-- **Hardened Deployment**: Multi-stage rootless Dockerfile (`UID 10001:10001`), `cap_drop: ALL`, read-only root filesystems, and health check probes.
+- **Zero-Dependency Binary Packet Decoding**: Pure-Python `struct` unpacking of Ethernet II, IPv4, TCP, UDP, ICMP, DNS, and HTTP headers without requiring `libpcap` or external C binaries.
+- **Stateful 5-Tuple Flow Tracking**:
+  - Maintains stateful bi-directional session tables keyed on canonical 5-tuples (`src_ip`, `dst_ip`, `src_port`, `dst_port`, `protocol`).
+  - Tracks full TCP state machines (`SYN_SENT`, `SYN_RECV`, `ESTABLISHED`, `FIN_WAIT`, `CLOSED`).
+  - Computes per-flow metrics: packet counts, byte volumes, duration, and session termination causes.
+- **Snort-Compatible Signature Engine**:
+  - Evaluates rule headers (protocol, directional ports, IP ranges) and rule options (`content`, `nocase`, `offset`, `depth`, `msg`, `sid`, `rev`).
+  - Maps triggered signatures to MITRE ATT&CK technique identifiers.
+- **Heuristic Protocol Anomaly Detection**:
+  - Flags TCP flag anomalies (Xmas scan `FIN-PSH-URG`, NULL scan, SYN-FIN combinations).
+  - Detects high-frequency port scanning and TCP SYN flood volume spikes.
+- **ACID SQLite WAL Persistence**:
+  - High-performance SQLite engine operating in Write-Ahead Logging (WAL) mode for storing flows and alerts.
+- **Dual Interface**:
+  - Command-line interface (`nids`) with Rich terminal formatting and packet inspection tools.
+  - Asynchronous FastAPI REST control plane for remote management and telemetry queries.
 
 ---
 
-## Getting Started
+## Technology Stack
 
-### Local Setup
+- **Core Engine & CLI**: Python 3.12+, Typer, Rich, Pydantic v2
+- **Network Decoding**: Python standard library `struct`, `binascii`, `socket`
+- **Control Plane**: FastAPI, Uvicorn, Starlette
+- **Persistence**: SQLite (WAL mode, busy timeout handling)
+- **Quality & Assurance**: Pytest, Pytest-Asyncio, Ruff, Mypy (strict typing)
+- **Containerization**: Rootless multi-stage Docker (`UID 10001`)
+
+---
+
+## CLI Reference & Operational Usage
+
+The platform provides the `nids` command-line tool:
 
 ```bash
-# Clone and enter directory
-git clone https://github.com/Krish9800/network-intrusion-detection-system.git
-cd network-intrusion-detection-system
+# 1. Analyze a raw hexadecimal packet string
+nids analyze "00112233445566778899aabb08004500003c1c4640004006b1e6c0a80001c0a8000204d200500000000000000000a00272109e4d0000020405b40402080a000000000000000001030307"
 
-# Create virtual environment and install in editable mode
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
+# 2. Analyze a raw binary packet file from disk
+nids analyze captured_packet.bin
 
-### Running the Test Suite & Quality Gates
-
-```bash
-# Code formatting & linting
-ruff format .
-ruff check . --fix
-
-# Strict static type analysis
-mypy --strict src tests
-
-# Security vulnerability scan
-bandit -r src/
-
-# Run tests with coverage (>= 90%)
-pytest --cov=src/nids --cov-report=term-missing --cov-fail-under=90
-```
-
----
-
-## CLI Usage
-
-The `nids` CLI provides rich terminal-based inspection and daemon controls:
-
-```bash
-# Analyze a raw hex-encoded network frame
-nids analyze "00000000000000000000000008004500003c00010000400600007f0000017f00000104d2005000000001000000005002040000000000"
-
-# List registered signatures and MITRE ATT&CK mappings
+# 3. List loaded detection signatures
 nids rules list
 
-# Inspect recorded alerts
-nids alerts list --severity critical
+# 4. List recorded intrusion alerts (with optional severity filter)
+nids alerts list --severity HIGH
 
-# Inspect active network sessions
-nids flows list --state established
+# 5. List tracked network flows (with optional state filter)
+nids flows list --state ESTABLISHED
 
-# Start the REST control plane daemon
+# 6. Launch the FastAPI control plane daemon
 nids serve --host 127.0.0.1 --port 8000
 ```
 
 ---
 
-## Docker Deployment
+## REST API Control Plane
 
-Run with Rootless Docker Compose:
+Start the FastAPI daemon directly or via CLI:
 
 ```bash
-docker compose up -d --build
+uvicorn nids.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-Verify service health:
+Interactive OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
+
+### Primary Endpoints
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| `GET` | `/health` | Health telemetry and system statistics |
+| `POST` | `/api/v1/packets/ingest` | Ingest raw hex or binary packet for real-time decoding and inspection |
+| `GET` | `/api/v1/flows` | Query active and historical 5-tuple network sessions |
+| `GET` | `/api/v1/alerts` | Query detected intrusion alerts with filtering options |
+| `GET` | `/api/v1/rules` | List registered detection signatures |
+| `POST` | `/api/v1/rules` | Dynamically register a new Snort-compatible detection rule |
+
+---
+
+## Installation & Setup
+
 ```bash
-curl -s http://127.0.0.1:8000/api/v1/health
-# {"status":"healthy","version":"0.1.0","active_flows":0}
+# Clone the repository
+git clone https://github.com/Krish9800/network-intrusion-detection-system.git
+cd network-intrusion-detection-system
+
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies in editable mode
+pip install --upgrade pip
+pip install -e ".[dev]"
 ```
 
 ---
 
-## Threat Model & Security
+## Testing & Quality Assurance
 
-Detailed STRIDE threat analysis, security controls, and adversarial verification tests are documented in [`docs/threat_model.md`](docs/threat_model.md).
+Run the comprehensive unit, integration, and security test suite:
+
+```bash
+# Run pytest test suite
+pytest
+
+# Run tests with code coverage metrics
+pytest --cov=nids --cov-report=term-missing
+
+# Run code style and linting checks
+ruff check .
+ruff format --check .
+
+# Run static type verification
+mypy src/nids
+```
+
+---
+
+## Security Model & Threat Boundaries
+
+Documented in `docs/threat_model.md`:
+
+- **Memory-Safe Protocol Parsing**: Handled in pure-Python `struct` decoding routines with rigorous bounds checking, eliminating buffer overflow and memory corruption vulnerabilities common in C-based packet decoders.
+- **Resource Exhaustion Defense**: Flow table capacity is capped with stream-relative LRU time-to-live (TTL) eviction, mitigating flow table saturation attacks.
+- **Unprivileged Execution**: Docker containers run as unprivileged user `UID 10001` with zero Linux capabilities (`cap_drop: ALL`).
+
+---
+
+## Limitations & Known Issues
+
+- **High-Throughput Wire Speeds**: Pure-Python decoding is optimized for rapid inspection, testing, and traffic rates up to tens of megabits per second. For 10+ Gbps line-rate deployments, dedicated kernel-bypass frameworks (e.g. DPDK, AF_PACKET) are recommended.
+- **IPv6 Support**: IPv6 decoding is planned for a future roadmap release; current decoding covers IPv4.
+
+---
+
+## License & Responsible Use
+
+This project is licensed under the **MIT License** - see [LICENSE](https://opensource.org/licenses/MIT).
+
+> [!NOTE]
+> Designed for defensive security monitoring, network protocol analysis, and threat hunting. Ensure packet capture is conducted only on authorized networks.
