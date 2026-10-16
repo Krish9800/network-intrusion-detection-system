@@ -68,6 +68,7 @@ High-performance, pure-Python Network Intrusion Detection System featuring binar
 
 ```bash
 # Clone and enter directory
+git clone https://github.com/Krish9800/network-intrusion-detection-system.git
 cd network-intrusion-detection-system
 
 # Create virtual environment and install in editable mode
